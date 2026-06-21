@@ -1,0 +1,174 @@
+import asyncpg
+import uuid
+from config import settings
+from datetime import datetime, timezone
+
+
+
+"""
+create_tables()        — CREATE TABLE IF NOT EXISTS for jobs and training_events
+create_job(...)        — INSERT a new job, return the UUID
+get_job(job_id)        — SELECT one job by ID
+update_job_status(...) — UPDATE status, started_at, worker_id
+complete_job(...)      — UPDATE status=complete, adapter_path, eval_loss
+fail_job(...)          — UPDATE status=failed, error_message
+insert_training_event(...)  — INSERT one training event row
+
+"""
+
+
+pool = None
+
+async def init_pool():
+    global pool
+    pool = await asyncpg.create_pool(
+        settings.database_url,
+        min_size=2,
+        max_size=10
+    )
+
+async def create_tables():
+    conn = await asyncpg.connect(settings.database_url)
+    try:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                status           VARCHAR(32) NOT NULL DEFAULT 'queued',
+                created_at       TIMESTAMPTZ DEFAULT NOW(),
+                started_at       TIMESTAMPTZ,
+                completed_at     TIMESTAMPTZ,
+                worker_id        VARCHAR,
+                num_examples     INTEGER,
+                task_description TEXT,
+                dataset_s3_key   VARCHAR,
+                adapter_path     VARCHAR,
+                adapter_size_mb  FLOAT,
+                eval_loss        FLOAT,
+                error_message    TEXT,
+                template_version VARCHAR
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_events (
+                id         BIGSERIAL PRIMARY KEY,
+                job_id     UUID REFERENCES jobs(id),
+                step       INTEGER,
+                epoch      FLOAT,
+                train_loss FLOAT,
+                eval_loss  FLOAT,
+                grad_norm  FLOAT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        print("Tables created")
+    finally:
+        await conn.close()
+
+
+async def create_job(id, num_examples, task_description, dataset_s3_key, template_version):
+
+    async with pool.acquire() as conn:
+        job_id = await conn.fetchval(
+            """
+            INSERT INTO jobs (id, num_examples, task_description, dataset_s3_key, template_version)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            id, num_examples, task_description, dataset_s3_key, template_version
+        )
+    return job_id
+
+async def get_job(job_id):
+
+    async with pool.acquire() as conn:
+        job = await conn.fetchrow(
+            """
+            SELECT * FROM jobs WHERE id = $1
+            """, 
+            job_id
+        )
+        return job
+    
+async def update_job_running(job_id, worker_id):
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'running',
+                started_at = NOW(),
+                worker_id = $2
+            WHERE id = $1
+            AND status = 'queued'
+            """,
+            job_id, worker_id
+        )
+        return int(result.split()[-1])
+    
+async def complete_job(job_id, adapter_path, eval_loss, adapter_size_mb):
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'complete',
+                completed_at = NOW(),
+                adapter_size_mb = $4,
+                eval_loss = $3,
+                adapter_path = $2
+
+            WHERE id = $1
+
+
+            """,
+            job_id, adapter_path, eval_loss, adapter_size_mb
+        )
+        return int(result.split()[-1])
+    
+async def fail_job(job_id, error_message):
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed',
+                error_message = $2
+
+            WHERE id = $1
+
+            """,
+            job_id, error_message
+        )
+        return int(result.split()[-1])
+    
+async def insert_training_event(job_id, step, epoch, train_loss, eval_loss, grad_norm):
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT into training_events(job_id, step, epoch, train_loss, eval_loss, grad_norm)
+            VALUES ($1,$2, $3, $4, $5, $6)
+            
+            """,
+            job_id, step, epoch, train_loss, eval_loss, grad_norm
+
+        )
+        
+
+async def fetch_training_events(job_id):
+    async with pool.acquire() as conn:
+        events = await conn.fetch(
+            "SELECT * FROM training_events WHERE job_id = $1 ORDER BY id ASC",
+            job_id
+        )
+    return events
+
+
+
+
+# asyncpg methods
+#   fetchrow()  → one row
+#   fetch()     → many rows
+#   fetchval()  → one value
+#   execute()   → write (INSERT/UPDATE/DELETE)
+

@@ -1,0 +1,70 @@
+# ── Secrets — never commit ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── AWS / credentials (in case anything gets dropped into the repo) ────
+.aws/
+*.pem
+*credentials*
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# ── Local data / model artifacts — large, regenerable, don't belong in git ─
+*.safetensors
+*.bin
+adapter_model.bin
+/tmp/
+local_adapters/
+datasets/*.jsonl
+!datasets/.gitkeep
+
+# ── Logs ─────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS / editor cruft ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ── Jupyter (if any exploratory notebooks creep in) ─────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Redis / Postgres local data dirs, if ever created inside the repo ───
+*.rdb
+pgdata/
+
+# ── Test / coverage artifacts ────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Project documentation / design artifacts — not application code ─────
+DOCS/
+design/
+Design/
+docs/
+prep/
+diagrams/
+components/
+component-learnings/
+
+# ── RunPod / deployment scratch ──────────────────────────────────────────
+*.pid
