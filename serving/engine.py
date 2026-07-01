@@ -1,34 +1,12 @@
-"""
-Phase 1
-1. Load base model in bf16
-2. Load adapter from local path using PeftModel.from_pretrained
-3. Format the input text using the inference template
-4. Tokenize
-5. model.generate()
-6. Decode output
-7. Return {"output": text, "latency_ms": int, "cache_hit": False}
-
-
-Training time:
-  rank_selector → lora_config → train_lora → save_pretrained
-                                              saves adapter_config.json
-
-Inference time:
-  PeftModel.from_pretrained reads adapter_config.json automatically
-  no rank_selector needed
-  no lora_config needed
-
-"""
 import asyncio
 import torch
 import time
-from storage import download_adapter
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from config import settings
 from peft import get_peft_model
 from peft import LoraConfig as PeftLoraConfig,  TaskType
 from collections import OrderedDict
-
+from storage import download_adapter
 bootstrap_config = PeftLoraConfig(
     task_type=TaskType.CAUSAL_LM,
     r=8,                          # arbitrary — never actually used for real inference
@@ -90,19 +68,23 @@ THEN, REGARDLESS OF HIT OR MISS — run_inference() continues:
     5. return {"output": text, "latency_ms": int, "cache_hit": bool}
 """
 
+class InsufficientVRAMError(Exception):
+    """Raised when all cached adapters have been evicted and VRAM is still insufficient."""
+    pass
+
+def total_cached_vram_mb():
+    return sum(entry["vram_mb"] for entry in cache.values())
+    
 
 
 
-def run_inference(job_id, adapter_path, text, max_new_tokens,
+async def run_inference(job_id, adapter_path, adapter_size_mb, text, max_new_tokens,
                    template_version: str = "alpaca_v1") -> dict:
     
     t0 = time.monotonic() # start time
+    
+    cache_hit = await get_or_load_adapter(job_id, adapter_path, adapter_size_mb)
 
-
-    # Download adapter to local directory
-    adapter_dir = download_adapter(job_id=job_id, adapter_s3_path=adapter_path)
-    # Load peft model
-    model = PeftModel.from_pretrained(base_model, adapter_dir)
     # Format input text using inference template
 
 
@@ -118,13 +100,18 @@ def run_inference(job_id, adapter_path, text, max_new_tokens,
 
     latency_ms = int((time.monotonic() - t0) * 1000) # end time | calculate time delta
 
-    return {"output": result, "latency_ms": latency_ms, "cache_hit": False}
+    
+    return {"output": result, "latency_ms": latency_ms, "cache_hit": cache_hit}
+
+
 
 async def get_or_load_adapter(job_id, adapter_path, adapter_size_mb):
+
+    adapter_dir = download_adapter(job_id=job_id, adapter_s3_path=adapter_path)
     async with cache_lock:                              # serialize concurrent requests
         if job_id in cache:
             cache.move_to_end(job_id)                    # cache hit — promote to MRU
-            return
+            return True
 
         # cache miss — make room using the cheap estimate BEFORE attempting load
         estimated_vram_mb = adapter_size_mb * 3.0
@@ -137,15 +124,30 @@ async def get_or_load_adapter(job_id, adapter_path, adapter_size_mb):
         # now attempt the real load, with the OOM-retry loop as the ground-truth fallback
         while True:
             try:
-                model.load_adapter(adapter_path, adapter_name=job_id)
+                #compute memory before loading adapter
+                mem_before = torch.cuda.memory_allocated()
+                # load adapter
+                model.load_adapter(adapter_dir, adapter_name=job_id)
+                 #compute memory after loading adapter
+                mem_after = torch.cuda.memory_allocated()
+                # compute delta
+                measured_vram_mb = (mem_after - mem_before) / 1e6
+
                 break
             except torch.cuda.OutOfMemoryError:
                 if len(cache) == 0:
-                    raise HTTPException(status_code=503, headers={"Retry-After": "30"})
+                    raise InsufficientVRAMError(f"Cannot load adapter for job {job_id} — insufficient VRAM after full cache eviction")
                 evicted_id, evicted_meta = cache.popitem(last=False)
                 model.delete_adapter(evicted_id)
                 torch.cuda.empty_cache()
 
-        # measure actual VRAM used, store it — more accurate than the 3x estimate for next time
-        cache[job_id] = {"vram_mb": measured_vram_mb, ...}
+        # store actual VRAM used by adapter 
+        cache[job_id] = {"vram_mb": measured_vram_mb, "adapter_path": adapter_dir}
+
         model.set_adapter(job_id)
+
+        return False
+
+
+
+

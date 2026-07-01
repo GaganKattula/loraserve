@@ -18,7 +18,7 @@ from redis import Redis
 from rq import Queue
 from config import settings
 from api.models import JobRequest, JobResponse, JobStatusResponse, InferRequest, InferResponse, Example
-from serving.engine import run_inference
+from serving.engine import run_inference, InsufficientVRAMError
 import redis.asyncio as aioredis
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -105,12 +105,16 @@ async def infer_job(job_id: UUID, request: InferRequest):
         raise HTTPException(status_code=400, detail="Job not ready")
     
     # insert serving engine call
-    result = run_inference(
-    job_id=str(job_id),
-    adapter_path=job["adapter_path"],
-    text=request.text,
-    max_new_tokens=request.max_new_tokens
+    try:
+        result = await run_inference(
+        job_id=str(job_id),
+        adapter_path=job["adapter_path"],
+        text=request.text,
+        adapter_size_mb = job["adapter_size_mb"],
+        max_new_tokens=request.max_new_tokens
     )
+    except InsufficientVRAMError:
+        raise HTTPException(status_code=503, headers={"Retry-After": "30"}, detail="Insufficient VRAM — retry shortly")
 
     return InferResponse(
     output=result["output"],
@@ -118,7 +122,6 @@ async def infer_job(job_id: UUID, request: InferRequest):
     latency_ms=result["latency_ms"],
     cache_hit=result["cache_hit"]
     )
-
 
 
 
