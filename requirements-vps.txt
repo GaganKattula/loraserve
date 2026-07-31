@@ -1,0 +1,6 @@
+fastapi>=0.104
+uvicorn[standard]>=0.24
+asyncpg>=0.29
+redis>=5.0
+boto3>=1.34
+pydantic-settings>=2.1

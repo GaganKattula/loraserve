@@ -74,6 +74,13 @@ class InsufficientVRAMError(Exception):
 
 def total_cached_vram_mb():
     return sum(entry["vram_mb"] for entry in cache.values())
+
+def evict_all():
+    """Flush every cached adapter and free VRAM. Call before training."""
+    while cache:
+        evicted_id, _ = cache.popitem(last=False)
+        model.delete_adapter(evicted_id)
+    torch.cuda.empty_cache()
     
 
 
@@ -111,6 +118,7 @@ async def get_or_load_adapter(job_id, adapter_path, adapter_size_mb):
     async with cache_lock:                              # serialize concurrent requests
         if job_id in cache:
             cache.move_to_end(job_id)                    # cache hit — promote to MRU
+            model.set_adapter(job_id)                    # activate this adapter on the shared model
             return True
 
         # cache miss — make room using the cheap estimate BEFORE attempting load

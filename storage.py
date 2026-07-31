@@ -9,9 +9,11 @@ upload_adapter(job_id, local_dir) → str         returns the S3 prefix
 
 """
 
-session = boto3.Session(profile_name=settings.aws_profile)
+_profile = settings.aws_profile if settings.aws_profile else None
+session = boto3.Session(profile_name=_profile)
 s3 = session.client("s3")
-# boto3 reads AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from env automatically
+# When aws_profile is set, uses ~/.aws/config profile (local dev).
+# When empty/None, boto3 falls back to AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY from env.
 
 def upload_dataset(job_id, content: bytes):
 

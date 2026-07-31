@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
 from uuid import UUID
 from typing import Optional
+from datetime import datetime
 
 
 """
@@ -8,7 +9,9 @@ Example          — one labeled example: text + label
 JobRequest       — POST /jobs body: task_description + list of Examples
                    with a validator that enforces minimum 20 examples
 JobResponse      — POST /jobs response: job_id + status + stream_url + infer_url
-JobStatusResponse — GET /jobs/{id} response: job_id + status + eval_loss + adapter_path
+JobStatusResponse — GET /jobs/{id} response: job_id + status + eval_loss + adapter_path + training metadata
+JobSummary       — one job in the GET /jobs list
+JobListResponse  — GET /jobs response: paginated job list
 """
 class Example(BaseModel):
     text: str
@@ -37,6 +40,33 @@ class JobStatusResponse(BaseModel):
     status: str
     eval_loss: Optional[float] = None
     adapter_path: Optional[str] = None
+    num_examples: Optional[int] = None
+    adapter_size_mb: Optional[float] = None
+    lora_r: Optional[int] = None
+    lora_alpha: Optional[int] = None
+    target_modules: Optional[str] = None
+    created_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class JobSummary(BaseModel):
+    job_id: UUID
+    status: str
+    task_description: Optional[str] = None
+    num_examples: Optional[int] = None
+    eval_loss: Optional[float] = None
+    adapter_size_mb: Optional[float] = None
+    lora_r: Optional[int] = None
+    lora_alpha: Optional[int] = None
+    created_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobSummary]
+    total: int
+    limit: int
+    offset: int
 
 class InferRequest(BaseModel):
     text: str

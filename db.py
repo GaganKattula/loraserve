@@ -45,7 +45,12 @@ async def create_tables():
                 adapter_size_mb  FLOAT,
                 eval_loss        FLOAT,
                 error_message    TEXT,
-                template_version VARCHAR
+                template_version VARCHAR,
+                last_alive_at    TIMESTAMPTZ,
+                retry_count      INTEGER DEFAULT 0,
+                lora_r           INTEGER,
+                lora_alpha       INTEGER,
+                target_modules   TEXT
             )
         """)
         await conn.execute("""
@@ -97,6 +102,7 @@ async def update_job_running(job_id, worker_id):
             UPDATE jobs
             SET status = 'running',
                 started_at = NOW(),
+                last_alive_at = NOW(),
                 worker_id = $2
             WHERE id = $1
             AND status = 'queued'
@@ -104,7 +110,23 @@ async def update_job_running(job_id, worker_id):
             job_id, worker_id
         )
         return int(result.split()[-1])
-    
+
+
+async def update_lora_config(job_id, lora_r, lora_alpha, target_modules):
+    """Store the selected LoRA config on the job record after rank selection."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE jobs
+            SET lora_r = $2,
+                lora_alpha = $3,
+                target_modules = $4
+            WHERE id = $1
+            """,
+            job_id, lora_r, lora_alpha, ",".join(target_modules)
+        )
+
+
 async def complete_job(job_id, adapter_path, eval_loss, adapter_size_mb):
 
     async with pool.acquire() as conn:
@@ -164,11 +186,83 @@ async def fetch_training_events(job_id):
     return events
 
 
+async def list_jobs(limit: int = 20, offset: int = 0):
+    """Return recent jobs, newest first. For the dashboard."""
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT id, status, created_at, started_at, completed_at,
+                   num_examples, task_description, eval_loss,
+                   adapter_size_mb, lora_r, lora_alpha, target_modules,
+                   error_message
+            FROM jobs
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit, offset
+        )
 
 
-# asyncpg methods
-#   fetchrow()  → one row
-#   fetch()     → many rows
-#   fetchval()  → one value
-#   execute()   → write (INSERT/UPDATE/DELETE)
+async def count_jobs():
+    """Total job count for pagination."""
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT COUNT(*) FROM jobs")
+
+
+async def heartbeat_job(job_id):
+    """Update last_alive_at for a running job. Called by worker heartbeat thread."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE jobs SET last_alive_at = NOW() WHERE id = $1 AND status = 'running'",
+            job_id
+        )
+
+
+async def get_stale_running_jobs(stale_seconds: int = 120):
+    """Find jobs stuck in 'running' with no heartbeat for stale_seconds."""
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT id FROM jobs
+            WHERE status = 'running'
+            AND last_alive_at < NOW() - INTERVAL '1 second' * $1
+            """,
+            stale_seconds
+        )
+
+
+async def get_unclaimed_queued_jobs(grace_seconds: int = 300):
+    """Find queued jobs that have sat unclaimed past the grace window."""
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT id FROM jobs
+            WHERE status = 'queued'
+            AND created_at < NOW() - INTERVAL '1 second' * $1
+            AND worker_id IS NULL
+            """,
+            grace_seconds
+        )
+
+
+async def get_upload_pending_jobs(max_retries: int = 3):
+    """Find jobs where adapter trained but S3 upload failed."""
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT id FROM jobs
+            WHERE status = 'upload_pending'
+            AND retry_count < $1
+            """,
+            max_retries
+        )
+
+
+async def increment_retry_count(job_id):
+    """Bump retry_count for upload retry tracking."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE jobs SET retry_count = retry_count + 1 WHERE id = $1",
+            job_id
+        )
 
