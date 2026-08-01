@@ -63,8 +63,8 @@ Design/
 docs/
 prep/
 diagrams/
-components/
-component-learnings/
+/components/
+/component-learnings/
 
 # ── RunPod / deployment scratch ──────────────────────────────────────────
 *.pid
