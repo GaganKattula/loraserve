@@ -259,5 +259,5 @@ async def health_check():
 
 
 import os
-if os.path.isdir("frontend"):
-    app.mount("/static", StaticFiles(directory="frontend"), name="static")
+if os.path.isdir("frontend/dist"):
+    app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
