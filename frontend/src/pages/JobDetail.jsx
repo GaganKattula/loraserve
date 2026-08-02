@@ -86,8 +86,8 @@ export default function JobDetail() {
 
       {/* Inference link for completed jobs */}
       {job.status === 'complete' && (
-        <Link to={`/jobs/${id}/infer`} className="btn btn-primary" style={{ display: 'inline-block', marginTop: '8px' }}>
-          Run Inference
+        <Link to={`/jobs/${id}/chat`} className="btn btn-primary" style={{ display: 'inline-block', marginTop: '8px' }}>
+          Chat with Model
         </Link>
       )}
     </>

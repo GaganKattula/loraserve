@@ -111,6 +111,32 @@ async def run_inference(job_id, adapter_path, adapter_size_mb, text, max_new_tok
     return {"output": result, "latency_ms": latency_ms, "cache_hit": cache_hit}
 
 
+async def run_chat(job_id, adapter_path, adapter_size_mb,
+                   messages: list[dict], max_new_tokens) -> dict:
+    """Multi-turn chat inference using the model's native chat template (ChatML).
+
+    Args:
+        messages: list of {"role": "user"|"assistant"|"system", "content": str}
+    """
+    t0 = time.monotonic()
+
+    cache_hit = await get_or_load_adapter(job_id, adapter_path, adapter_size_mb)
+
+    # Format using the tokenizer's built-in chat template (ChatML for SmolLM2-Instruct)
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    inputs = tokenizer(text=prompt, return_tensors="pt").to(settings.device)
+    input_length = inputs["input_ids"].shape[1]  # (1, T) → T
+
+    outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+    result = tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True)
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    return {"output": result, "latency_ms": latency_ms, "cache_hit": cache_hit}
+
 
 async def get_or_load_adapter(job_id, adapter_path, adapter_size_mb):
 

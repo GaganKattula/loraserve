@@ -38,6 +38,19 @@ export async function runInference(jobId, text, maxNewTokens = 20) {
   return res.json();
 }
 
+export async function chat(jobId, messages, maxNewTokens = 50) {
+  const res = await fetch(`${API}/chat/${jobId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, max_new_tokens: maxNewTokens }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Chat failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export function streamJob(jobId) {
   return new EventSource(`${API}/jobs/${jobId}/stream`);
 }

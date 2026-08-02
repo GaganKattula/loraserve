@@ -3,7 +3,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import NewJob from './pages/NewJob';
 import JobDetail from './pages/JobDetail';
-import Inference from './pages/Inference';
+import Chat from './pages/Chat';
 
 export default function App() {
   return (
@@ -12,7 +12,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/new" element={<NewJob />} />
         <Route path="/jobs/:id" element={<JobDetail />} />
-        <Route path="/jobs/:id/infer" element={<Inference />} />
+        <Route path="/jobs/:id/chat" element={<Chat />} />
       </Routes>
     </Layout>
   );

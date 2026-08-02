@@ -17,18 +17,9 @@ from storage import upload_dataset
 from sqs import enqueue_job, notify_lambda
 from config import settings
 from api.models import (JobRequest, JobResponse, JobStatusResponse, InferRequest,
-                        InferResponse, Example, JobListResponse, JobSummary)
-import gpu_lock
-from fastapi import Depends, Header
-
-
-async def verify_gpu_secret(authorization: str | None = Header(default=None)):
-    """Reject requests without a valid shared secret when one is configured."""
-    secret = settings.gpu_shared_secret
-    if not secret:
-        return  # no secret configured — dev mode, skip auth
-    if authorization != f"Bearer {secret}":
-        raise HTTPException(status_code=401, detail="Invalid or missing GPU shared secret")
+                        InferResponse, Example, JobListResponse, JobSummary,
+                        ChatRequest, ChatResponse)
+import httpx
 import redis.asyncio as aioredis
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,6 +28,16 @@ from fastapi.staticfiles import StaticFiles
 def serialize_examples(examples: list) -> bytes:
     lines = [json.dumps({"text": e.text, "label": e.label}) for e in examples]
     return "\n".join(lines).encode("utf-8")
+
+
+async def _get_pod_url() -> str | None:
+    """Read GPU pod hostname from Redis. Returns base URL or None if pod is offline."""
+    r = aioredis.from_url(settings.redis_url)
+    host = await r.get("gpu:pod:host")
+    await r.aclose()
+    if host is None:
+        return None
+    return f"http://{host.decode()}:8001"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -133,46 +134,65 @@ async def list_jobs(limit: int = 20, offset: int = 0):
     )
 
 
-@app.post('/infer/{job_id}', dependencies=[Depends(verify_gpu_secret)])
+@app.post('/infer/{job_id}')
 async def infer_job(job_id: UUID, request: InferRequest):
-    """
-    Takes job_id: UUID as path parameter and request: InferRequest as body
-    Fetch job from Postgres
-    If job status is not "complete" → raise HTTPException(status_code=400, detail="Job not ready")
-    Call serving engine — import and call directly for Phase 1
-    Return InferResponse
-    """
+    """Proxy single-shot inference to GPU pod. VPS validates job, pod runs inference."""
     job = await db_get_job(job_id=job_id)
-
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if job['status'] != 'complete':
         raise HTTPException(status_code=400, detail="Job not ready")
 
-    # check GPU lock — training in progress means GPU is unavailable
-    if gpu_lock.is_held():
+    pod_url = await _get_pod_url()
+    if pod_url is None:
         raise HTTPException(status_code=503, headers={"Retry-After": "30"},
-                            detail="GPU busy (training in progress) — retry shortly")
+                            detail="GPU pod is offline")
 
-    # lazy import: serving engine pulls in torch/transformers/peft
-    from serving.engine import run_inference, InsufficientVRAMError
-    try:
-        result = await run_inference(
-        job_id=str(job_id),
-        adapter_path=job["adapter_path"],
-        text=request.text,
-        adapter_size_mb = job["adapter_size_mb"],
-        max_new_tokens=request.max_new_tokens
-    )
-    except InsufficientVRAMError:
-        raise HTTPException(status_code=503, headers={"Retry-After": "30"}, detail="Insufficient VRAM — retry shortly")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{pod_url}/infer/{job_id}",
+            params={"adapter_path": job["adapter_path"],
+                    "adapter_size_mb": job["adapter_size_mb"]},
+            json={"text": request.text, "max_new_tokens": request.max_new_tokens},
+            headers={"Authorization": f"Bearer {settings.gpu_shared_secret}"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "GPU pod error"))
 
-    return InferResponse(
-    output=result["output"],
-    job_id=job_id,
-    latency_ms=result["latency_ms"],
-    cache_hit=result["cache_hit"]
-    )
+    data = resp.json()
+    return InferResponse(output=data["output"], job_id=job_id,
+                         latency_ms=data["latency_ms"], cache_hit=data["cache_hit"])
+
+
+@app.post('/chat/{job_id}')
+async def chat_job(job_id: UUID, request: ChatRequest):
+    """Proxy multi-turn chat inference to GPU pod. VPS validates job, pod runs inference."""
+    job = await db_get_job(job_id=job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job['status'] != 'complete':
+        raise HTTPException(status_code=400, detail="Job not ready")
+
+    pod_url = await _get_pod_url()
+    if pod_url is None:
+        raise HTTPException(status_code=503, headers={"Retry-After": "30"},
+                            detail="GPU pod is offline")
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{pod_url}/chat/{job_id}",
+            params={"adapter_path": job["adapter_path"],
+                    "adapter_size_mb": job["adapter_size_mb"]},
+            json={"messages": [{"role": m.role, "content": m.content} for m in request.messages],
+                  "max_new_tokens": request.max_new_tokens},
+            headers={"Authorization": f"Bearer {settings.gpu_shared_secret}"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "GPU pod error"))
+
+    data = resp.json()
+    return ChatResponse(output=data["output"], job_id=job_id,
+                        latency_ms=data["latency_ms"], cache_hit=data["cache_hit"])
 
 
 

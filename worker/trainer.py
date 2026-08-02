@@ -41,34 +41,45 @@ if tokenizer.pad_token is None:
 
 class TextDataset(Dataset):
 
-    def __init__(self, encodings):
+    def __init__(self, encodings, prompt_lengths=None):
         self.encodings = encodings
+        self.prompt_lengths = prompt_lengths  # None = no masking (full-sequence loss)
 
 
     def __len__(self):
         return len(self.encodings)
-    
-    def __getitem__(self,idx):
+
+    def __getitem__(self, idx):
         item = self.encodings[idx]
 
-        return {
-            'input_ids': torch. tensor (item['input_ids'],dtype=torch.long),
-            'attention_mask': torch.tensor(item['attention_mask'],dtype=torch.long),
-            'labels': torch. tensor(item['input_ids'],dtype=torch.long),
-                }
+        out = {
+            'input_ids': torch.tensor(item['input_ids'], dtype=torch.long),
+            'attention_mask': torch.tensor(item['attention_mask'], dtype=torch.long),
+            'labels': torch.tensor(item['input_ids'], dtype=torch.long),
+        }
+        if self.prompt_lengths is not None:
+            out['prompt_length'] = self.prompt_lengths[idx]
+        return out
 
 def collate_fn(batch):
     input_ids = pad_sequence(
-                [b['input_ids'] for b in batch], 
+                [b['input_ids'] for b in batch],
                              batch_first=True,
                              padding_value=tokenizer.pad_token_id)
-    attention_mask = pad_sequence ([b['attention_mask'] for b in batch], 
+    attention_mask = pad_sequence([b['attention_mask'] for b in batch],
                              batch_first=True,
                              padding_value=0)
     labels = input_ids.clone()
 
-    labels[labels == tokenizer.pad_token_id] = -100 # ignore padding in loss
-              
+    labels[labels == tokenizer.pad_token_id] = -100  # ignore padding in loss
+
+    # Prompt masking: if prompt_length is present, set labels[:prompt_length] = -100
+    # so only response tokens contribute to the cross-entropy loss.
+    if 'prompt_length' in batch[0]:
+        for i, b in enumerate(batch):
+            prompt_len = b['prompt_length']
+            labels[i, :prompt_len] = -100  # mask prompt tokens
+
     return {'input_ids': input_ids, 'attention_mask': attention_mask,
                 'labels': labels}
 
@@ -79,9 +90,33 @@ TEMPLATES = {
     )
 }
 
+# Prompt-only templates — same structure but WITHOUT the label.
+# Used to compute prompt token length for prompt masking.
+PROMPT_TEMPLATES = {
+    "alpaca_v1": lambda text: (
+        f"### Instruction:\n{text}\n\n### Response:\n"
+    )
+}
+
 def format_examples(examples: list, template_version: str) -> list[str]:
     template_fn = TEMPLATES[template_version]
     return [template_fn(ex.text, ex.label) for ex in examples]
+
+
+def compute_prompt_lengths(examples: list, template_version: str, max_length: int) -> list[int]:
+    """Tokenize prompt-only portions to find where the response starts.
+
+    Returns a list of token counts — one per example. Labels tokens start
+    at this index. Everything before it is prompt and should be masked (-100)
+    when mask_prompt is enabled.
+    """
+    prompt_fn = PROMPT_TEMPLATES[template_version]
+    lengths = []
+    for ex in examples:
+        prompt_only = prompt_fn(ex.text)
+        prompt_ids = tokenizer(prompt_only, truncation=True, max_length=max_length, padding=False)
+        lengths.append(len(prompt_ids["input_ids"]))
+    return lengths
 
 
 def parse_jsonl(content: bytes) -> list[Example]:
@@ -105,8 +140,9 @@ def split_dataset(examples, eval_ratio=0.1, seed=42):
 num_workers = 0 if settings.device == "mps" else 2
 LOG_EVERY = 1
 
-def train_lora(job_id, dataset_s3_key, lora_config, template_version, redis_client, pg_conn, num_epochs: int = 3, 
-               batch_size: int = 4, learning_rate: float = 2e-5, max_length: int = 512 ) -> dict:
+def train_lora(job_id, dataset_s3_key, lora_config, template_version, redis_client, pg_conn, num_epochs: int = 3,
+               batch_size: int = 4, learning_rate: float = 2e-5, max_length: int = 512,
+               mask_prompt: bool = False) -> dict:
 # returns:
     # {
     # 'adapter_local_path': '/tmp/{job_id}/adapter'
@@ -135,6 +171,13 @@ def train_lora(job_id, dataset_s3_key, lora_config, template_version, redis_clie
         tokenizer(text, truncation=True, max_length=max_length, padding=False)
         for text in eval_texts
     ]
+
+    # Prompt masking: compute prompt token lengths so collate_fn can mask them
+    train_prompt_lengths = None
+    eval_prompt_lengths = None
+    if mask_prompt:
+        train_prompt_lengths = compute_prompt_lengths(train_examples, template_version, max_length)
+        eval_prompt_lengths = compute_prompt_lengths(eval_examples, template_version, max_length)
     # Step 3 - Load base model
     base_model = AutoModelForCausalLM.from_pretrained(settings.base_model, dtype= settings.dtype, device_map=settings.device)
     
@@ -153,8 +196,8 @@ def train_lora(job_id, dataset_s3_key, lora_config, template_version, redis_clie
 
     # Step 4 - DataLoader
 
-    train_dataset = TextDataset(train_encodings)
-    eval_dataset = TextDataset(eval_encodings)
+    train_dataset = TextDataset(train_encodings, prompt_lengths=train_prompt_lengths)
+    eval_dataset = TextDataset(eval_encodings, prompt_lengths=eval_prompt_lengths)
 
     train_loader = DataLoader(dataset=train_dataset, shuffle=True,
                               batch_size=4, collate_fn=collate_fn,

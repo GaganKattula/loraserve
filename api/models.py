@@ -77,3 +77,18 @@ class InferResponse(BaseModel):
     job_id: UUID
     latency_ms: int
     cache_hit: bool
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    max_new_tokens: int = 50
+
+class ChatResponse(BaseModel):
+    output: str
+    job_id: UUID
+    latency_ms: int
+    cache_hit: bool

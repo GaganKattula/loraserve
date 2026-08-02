@@ -11,6 +11,8 @@
 """
 import multiprocessing
 import asyncio
+import os
+import socket
 import threading
 import psycopg2
 import uuid
@@ -30,6 +32,19 @@ pg = psycopg2.connect(settings.database_url)
 
 WORKER_ID = str(uuid.uuid4())
 HEARTBEAT_INTERVAL = 30  # seconds
+POD_HOST_TTL = 90  # 3x heartbeat — auto-expires if pod dies
+
+
+def _get_pod_ip() -> str:
+    """Get this pod's IP for VPS discovery. Env var override for containers."""
+    return os.environ.get("POD_HOST", socket.gethostbyname(socket.gethostname()))
+
+
+def _register_pod():
+    """Write this pod's IP to Redis so the VPS knows where to proxy inference."""
+    pod_ip = _get_pod_ip()
+    r.set("gpu:pod:host", pod_ip, ex=POD_HOST_TTL)
+    return pod_ip
 
 
 class HeartbeatThread(threading.Thread):
@@ -47,6 +62,7 @@ class HeartbeatThread(threading.Thread):
         try:
             while not self._stop_event.wait(HEARTBEAT_INTERVAL):
                 gpu_lock.renew(self._lock_token)
+                _register_pod()  # renew pod discovery key alongside GPU lock
                 self._loop.run_until_complete(heartbeat_job(self._job_id))
         finally:
             self._loop.close()
@@ -124,6 +140,19 @@ logger = logging.getLogger("worker")
 _running = True
 
 
+def _start_inference_server():
+    """Start the GPU pod inference FastAPI app on :8001 in a background thread."""
+    import uvicorn
+    from serving.app import app as infer_app
+
+    def _run():
+        uvicorn.run(infer_app, host="0.0.0.0", port=8001, log_level="info")
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    logger.info("Inference server started on :8001")
+
+
 def _handle_sigterm(signum, frame):
     global _running
     logger.info("SIGTERM received, finishing current job then exiting")
@@ -134,6 +163,14 @@ def run_poll_loop():
     """SQS long-poll loop. Replaces the RQ worker process."""
     signal.signal(signal.SIGTERM, _handle_sigterm)
     signal.signal(signal.SIGINT, _handle_sigterm)
+
+    # Register this pod's IP in Redis for VPS inference proxy discovery
+    pod_ip = _register_pod()
+    logger.info("Registered pod at %s (Redis key gpu:pod:host, TTL %ds)", pod_ip, POD_HOST_TTL)
+
+    # Start the GPU pod inference server in a background thread
+    _start_inference_server()
+
     logger.info("Worker poll loop started")
 
     while _running:
