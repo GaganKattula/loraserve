@@ -4,4 +4,4 @@ line-length = 100
 select = ["E", "F", "I"]  # pycodestyle errors, pyflakes, isort
 
 [lint.isort]
-known-first-party = ["api", "worker", "serving"]
+known-first-party = ["api", "worker", "serving", "config", "db", "gpu_lock", "storage", "sqs", "watchdog"]
