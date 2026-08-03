@@ -189,6 +189,10 @@ def run_poll_loop():
 
     while _running:
         try:
+            # Renew pod registration on every poll cycle (~20s) so the
+            # VPS knows the GPU pod is alive even when no jobs are running.
+            _register_pod()
+
             msg = receive_job(wait_seconds=20)
             if msg is None:
                 continue
