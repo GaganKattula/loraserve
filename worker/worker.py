@@ -153,8 +153,16 @@ logger = logging.getLogger("worker")
 _running = True
 
 
+_inference_server_started = False
+
+
 def _start_inference_server():
     """Start the GPU pod inference FastAPI app on :8001 in a background thread."""
+    global _inference_server_started
+    if _inference_server_started:
+        return
+    _inference_server_started = True
+
     import uvicorn
 
     from serving.app import app as infer_app
