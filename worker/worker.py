@@ -153,35 +153,14 @@ logger = logging.getLogger("worker")
 _running = True
 
 
-_inference_server_started = False
-
-
 def _start_inference_server():
     """Start the GPU pod inference FastAPI app on :8001 in a background thread."""
-    global _inference_server_started
-    if _inference_server_started:
-        return
-    _inference_server_started = True
-
-    import socket as _socket
-
     import uvicorn
 
     from serving.app import app as infer_app
 
-    # Pre-bind the socket so uvicorn doesn't attempt its own bind
-    # (which double-binds under multiprocessing spawn mode)
-    sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-    sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", 8001))
-    sock.set_inheritable(True)
-
     def _run():
-        config = uvicorn.Config(
-            infer_app, host="0.0.0.0", port=8001, log_level="info", fd=sock.fileno()
-        )
-        server = uvicorn.Server(config)
-        server.run()
+        uvicorn.run(infer_app, host="0.0.0.0", port=8001, log_level="info")
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
