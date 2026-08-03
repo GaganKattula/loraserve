@@ -13,20 +13,24 @@ JobStatusResponse — GET /jobs/{id} response: job_id + status + eval_loss + ada
 JobSummary       — one job in the GET /jobs list
 JobListResponse  — GET /jobs response: paginated job list
 """
+
+
 class Example(BaseModel):
     text: str
     label: str
 
+
 class JobRequest(BaseModel):
     task_description: str
     examples: list[Example]
-    
+
     @field_validator("examples")
     @classmethod
     def min_examples(cls, v):
         if len(v) < 20:
             raise ValueError("Need at least 20 examples")
         return v
+
 
 class JobResponse(BaseModel):
     job_id: UUID
@@ -68,9 +72,11 @@ class JobListResponse(BaseModel):
     limit: int
     offset: int
 
+
 class InferRequest(BaseModel):
     text: str
     max_new_tokens: int = 20
+
 
 class InferResponse(BaseModel):
     output: str
@@ -83,9 +89,11 @@ class ChatMessage(BaseModel):
     role: str
     content: str
 
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     max_new_tokens: int = 50
+
 
 class ChatResponse(BaseModel):
     output: str

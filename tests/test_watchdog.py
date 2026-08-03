@@ -37,13 +37,15 @@ async def init_db_pool(clean_db):
 
 @pytest.mark.asyncio
 class TestWatchdogScans:
-
     async def test_stale_job_marked_failed(self, clean_db):
         """Pod crashed mid-training → heartbeat stopped → watchdog catches it."""
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         await db.update_job_running(job_id, "worker-1")
 
@@ -64,8 +66,11 @@ class TestWatchdogScans:
         """Running job with recent heartbeat must NOT be touched."""
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         await db.update_job_running(job_id, "worker-1")
         # last_alive_at just set — fresh

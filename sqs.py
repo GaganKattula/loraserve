@@ -6,6 +6,7 @@ receive_job(wait_seconds=20)   → dict | None
 delete_job_message(receipt_handle) → None
 notify_lambda(job_id)          → None  (fire-and-forget async invocation)
 """
+
 import json
 import datetime
 import logging
@@ -23,10 +24,12 @@ def enqueue_job(job_id: str) -> str:
     """Send a job dispatch message to SQS. Returns the SQS MessageId."""
     resp = _sqs.send_message(
         QueueUrl=settings.sqs_queue_url,
-        MessageBody=json.dumps({
-            "job_id": job_id,
-            "enqueued_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        }),
+        MessageBody=json.dumps(
+            {
+                "job_id": job_id,
+                "enqueued_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            }
+        ),
     )
     logger.info("Enqueued job %s → SQS MessageId %s", job_id, resp["MessageId"])
     return resp["MessageId"]

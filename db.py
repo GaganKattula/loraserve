@@ -1,8 +1,5 @@
 import asyncpg
-import uuid
 from config import settings
-from datetime import datetime, timezone
-
 
 
 """
@@ -19,13 +16,11 @@ insert_training_event(...)  — INSERT one training event row
 
 pool = None
 
+
 async def init_pool():
     global pool
-    pool = await asyncpg.create_pool(
-        settings.database_url,
-        min_size=2,
-        max_size=10
-    )
+    pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
+
 
 async def create_tables():
     conn = await asyncpg.connect(settings.database_url)
@@ -70,7 +65,9 @@ async def create_tables():
         await conn.close()
 
 
-async def create_job(id, num_examples, task_description, dataset_s3_key, template_version):
+async def create_job(
+    id, num_examples, task_description, dataset_s3_key, template_version
+):
 
     async with pool.acquire() as conn:
         job_id = await conn.fetchval(
@@ -79,9 +76,14 @@ async def create_job(id, num_examples, task_description, dataset_s3_key, templat
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id
             """,
-            id, num_examples, task_description, dataset_s3_key, template_version
+            id,
+            num_examples,
+            task_description,
+            dataset_s3_key,
+            template_version,
         )
     return job_id
+
 
 async def get_job(job_id):
 
@@ -89,11 +91,12 @@ async def get_job(job_id):
         job = await conn.fetchrow(
             """
             SELECT * FROM jobs WHERE id = $1
-            """, 
-            job_id
+            """,
+            job_id,
         )
         return job
-    
+
+
 async def update_job_running(job_id, worker_id):
 
     async with pool.acquire() as conn:
@@ -107,7 +110,8 @@ async def update_job_running(job_id, worker_id):
             WHERE id = $1
             AND status = 'queued'
             """,
-            job_id, worker_id
+            job_id,
+            worker_id,
         )
         return int(result.split()[-1])
 
@@ -123,7 +127,10 @@ async def update_lora_config(job_id, lora_r, lora_alpha, target_modules):
                 target_modules = $4
             WHERE id = $1
             """,
-            job_id, lora_r, lora_alpha, ",".join(target_modules)
+            job_id,
+            lora_r,
+            lora_alpha,
+            ",".join(target_modules),
         )
 
 
@@ -143,10 +150,14 @@ async def complete_job(job_id, adapter_path, eval_loss, adapter_size_mb):
 
 
             """,
-            job_id, adapter_path, eval_loss, adapter_size_mb
+            job_id,
+            adapter_path,
+            eval_loss,
+            adapter_size_mb,
         )
         return int(result.split()[-1])
-    
+
+
 async def fail_job(job_id, error_message):
 
     async with pool.acquire() as conn:
@@ -159,10 +170,12 @@ async def fail_job(job_id, error_message):
             WHERE id = $1
 
             """,
-            job_id, error_message
+            job_id,
+            error_message,
         )
         return int(result.split()[-1])
-    
+
+
 async def insert_training_event(job_id, step, epoch, train_loss, eval_loss, grad_norm):
 
     async with pool.acquire() as conn:
@@ -172,16 +185,19 @@ async def insert_training_event(job_id, step, epoch, train_loss, eval_loss, grad
             VALUES ($1,$2, $3, $4, $5, $6)
             
             """,
-            job_id, step, epoch, train_loss, eval_loss, grad_norm
-
+            job_id,
+            step,
+            epoch,
+            train_loss,
+            eval_loss,
+            grad_norm,
         )
-        
+
 
 async def fetch_training_events(job_id):
     async with pool.acquire() as conn:
         events = await conn.fetch(
-            "SELECT * FROM training_events WHERE job_id = $1 ORDER BY id ASC",
-            job_id
+            "SELECT * FROM training_events WHERE job_id = $1 ORDER BY id ASC", job_id
         )
     return events
 
@@ -199,7 +215,8 @@ async def list_jobs(limit: int = 20, offset: int = 0):
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
             """,
-            limit, offset
+            limit,
+            offset,
         )
 
 
@@ -214,7 +231,7 @@ async def heartbeat_job(job_id):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE jobs SET last_alive_at = NOW() WHERE id = $1 AND status = 'running'",
-            job_id
+            job_id,
         )
 
 
@@ -227,7 +244,7 @@ async def get_stale_running_jobs(stale_seconds: int = 120):
             WHERE status = 'running'
             AND last_alive_at < NOW() - INTERVAL '1 second' * $1
             """,
-            stale_seconds
+            stale_seconds,
         )
 
 
@@ -241,7 +258,7 @@ async def get_unclaimed_queued_jobs(grace_seconds: int = 300):
             AND created_at < NOW() - INTERVAL '1 second' * $1
             AND worker_id IS NULL
             """,
-            grace_seconds
+            grace_seconds,
         )
 
 
@@ -254,7 +271,7 @@ async def get_upload_pending_jobs(max_retries: int = 3):
             WHERE status = 'upload_pending'
             AND retry_count < $1
             """,
-            max_retries
+            max_retries,
         )
 
 
@@ -262,7 +279,5 @@ async def increment_retry_count(job_id):
     """Bump retry_count for upload retry tracking."""
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE jobs SET retry_count = retry_count + 1 WHERE id = $1",
-            job_id
+            "UPDATE jobs SET retry_count = retry_count + 1 WHERE id = $1", job_id
         )
-

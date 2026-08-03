@@ -3,22 +3,32 @@ POST /jobs      → validate, upload dataset to S3, INSERT to Postgres, enqueue 
 GET  /jobs/{id} → SELECT job from Postgres, return status
 POST /infer/{id} → validate job complete, run inference
 """
+
 import asyncio
 import db
+import os
 import uuid
 from uuid import UUID
 import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from db import create_tables, init_pool
-from db import  create_job as db_create_job
+from db import create_job as db_create_job
 from db import get_job as db_get_job
 from storage import upload_dataset
 from sqs import enqueue_job, notify_lambda
 from config import settings
-from api.models import (JobRequest, JobResponse, JobStatusResponse, InferRequest,
-                        InferResponse, Example, JobListResponse, JobSummary,
-                        ChatRequest, ChatResponse)
+from api.models import (
+    JobRequest,
+    JobResponse,
+    JobStatusResponse,
+    InferRequest,
+    InferResponse,
+    JobListResponse,
+    JobSummary,
+    ChatRequest,
+    ChatResponse,
+)
 import httpx
 import redis.asyncio as aioredis
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -39,45 +49,53 @@ async def _get_pod_url() -> str | None:
         return None
     return f"http://{host.decode()}:8001"
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_tables()
     await init_pool()
     # start watchdog as background task
     from watchdog import run_watchdog
+
     watchdog_task = asyncio.create_task(run_watchdog())
     yield
     watchdog_task.cancel()
     await db.pool.close()
 
+
 app = FastAPI(lifespan=lifespan)
 
-@app.post('/jobs', status_code=202)
+
+@app.post("/jobs", status_code=202)
 async def create_job(request: JobRequest):
-    
+
     content = serialize_examples(request.examples)
     # upload dataset to S3
-    job_id = uuid.uuid4()   # generate UUID before inserting
+    job_id = uuid.uuid4()  # generate UUID before inserting
     key = upload_dataset(str(job_id), content)
 
     # INSERT to Postgres
-    job_id = await db_create_job(id=job_id, num_examples=len(request.examples), task_description=request.task_description,
-                               dataset_s3_key=key,template_version='alpaca_v1')
-
+    job_id = await db_create_job(
+        id=job_id,
+        num_examples=len(request.examples),
+        task_description=request.task_description,
+        dataset_s3_key=key,
+        template_version="alpaca_v1",
+    )
 
     # dispatch to SQS — worker long-polls this queue
     enqueue_job(str(job_id))
     notify_lambda(str(job_id))
-    
+
     return JobResponse(
-    job_id=job_id,
-    status="queued",
-    stream_url=f"/jobs/{job_id}/stream",
-    infer_url=f"/infer/{job_id}"
+        job_id=job_id,
+        status="queued",
+        stream_url=f"/jobs/{job_id}/stream",
+        infer_url=f"/infer/{job_id}",
     )
 
 
-@app.get('/jobs/{job_id}')
+@app.get("/jobs/{job_id}")
 async def get_job(job_id: UUID):
     """
     Takes job_id: UUID as path parameter
@@ -106,8 +124,7 @@ async def get_job(job_id: UUID):
     )
 
 
-
-@app.get('/jobs')
+@app.get("/jobs")
 async def list_jobs(limit: int = 20, offset: int = 0):
     """Paginated job list, newest first. Powers the dashboard."""
     jobs = await db.list_jobs(limit=min(limit, 100), offset=offset)
@@ -134,69 +151,92 @@ async def list_jobs(limit: int = 20, offset: int = 0):
     )
 
 
-@app.post('/infer/{job_id}')
+@app.post("/infer/{job_id}")
 async def infer_job(job_id: UUID, request: InferRequest):
     """Proxy single-shot inference to GPU pod. VPS validates job, pod runs inference."""
     job = await db_get_job(job_id=job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job['status'] != 'complete':
+    if job["status"] != "complete":
         raise HTTPException(status_code=400, detail="Job not ready")
 
     pod_url = await _get_pod_url()
     if pod_url is None:
-        raise HTTPException(status_code=503, headers={"Retry-After": "30"},
-                            detail="GPU pod is offline")
+        raise HTTPException(
+            status_code=503, headers={"Retry-After": "30"}, detail="GPU pod is offline"
+        )
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
             f"{pod_url}/infer/{job_id}",
-            params={"adapter_path": job["adapter_path"],
-                    "adapter_size_mb": job["adapter_size_mb"]},
+            params={
+                "adapter_path": job["adapter_path"],
+                "adapter_size_mb": job["adapter_size_mb"],
+            },
             json={"text": request.text, "max_new_tokens": request.max_new_tokens},
             headers={"Authorization": f"Bearer {settings.gpu_shared_secret}"},
         )
     if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "GPU pod error"))
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=resp.json().get("detail", "GPU pod error"),
+        )
 
     data = resp.json()
-    return InferResponse(output=data["output"], job_id=job_id,
-                         latency_ms=data["latency_ms"], cache_hit=data["cache_hit"])
+    return InferResponse(
+        output=data["output"],
+        job_id=job_id,
+        latency_ms=data["latency_ms"],
+        cache_hit=data["cache_hit"],
+    )
 
 
-@app.post('/chat/{job_id}')
+@app.post("/chat/{job_id}")
 async def chat_job(job_id: UUID, request: ChatRequest):
     """Proxy multi-turn chat inference to GPU pod. VPS validates job, pod runs inference."""
     job = await db_get_job(job_id=job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job['status'] != 'complete':
+    if job["status"] != "complete":
         raise HTTPException(status_code=400, detail="Job not ready")
 
     pod_url = await _get_pod_url()
     if pod_url is None:
-        raise HTTPException(status_code=503, headers={"Retry-After": "30"},
-                            detail="GPU pod is offline")
+        raise HTTPException(
+            status_code=503, headers={"Retry-After": "30"}, detail="GPU pod is offline"
+        )
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{pod_url}/chat/{job_id}",
-            params={"adapter_path": job["adapter_path"],
-                    "adapter_size_mb": job["adapter_size_mb"]},
-            json={"messages": [{"role": m.role, "content": m.content} for m in request.messages],
-                  "max_new_tokens": request.max_new_tokens},
+            params={
+                "adapter_path": job["adapter_path"],
+                "adapter_size_mb": job["adapter_size_mb"],
+            },
+            json={
+                "messages": [
+                    {"role": m.role, "content": m.content} for m in request.messages
+                ],
+                "max_new_tokens": request.max_new_tokens,
+            },
             headers={"Authorization": f"Bearer {settings.gpu_shared_secret}"},
         )
     if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "GPU pod error"))
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=resp.json().get("detail", "GPU pod error"),
+        )
 
     data = resp.json()
-    return ChatResponse(output=data["output"], job_id=job_id,
-                        latency_ms=data["latency_ms"], cache_hit=data["cache_hit"])
+    return ChatResponse(
+        output=data["output"],
+        job_id=job_id,
+        latency_ms=data["latency_ms"],
+        cache_hit=data["cache_hit"],
+    )
 
 
-
-@app.get('/jobs/{job_id}/stream')
+@app.get("/jobs/{job_id}/stream")
 async def stream_job(job_id: UUID):
     async def event_generator():
         # Step 1 — subscribe FIRST, before any status check (TOCTOU fix)
@@ -234,7 +274,7 @@ async def stream_job(job_id: UUID):
                 continue
             data = json.loads(message["data"])
             if data.get("step") is not None and data["step"] <= max_step_seen:
-                continue   # skip duplicate already replayed from Postgres
+                continue  # skip duplicate already replayed from Postgres
             yield f"data: {json.dumps(data)}\n\n"
             if data.get("type") == "done":
                 break
@@ -245,11 +285,11 @@ async def stream_job(job_id: UUID):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-@app.get('/health')
+@app.get("/health")
 async def health_check():
     """Liveness probe — checks DB pool and Redis connectivity."""
     db_ok = False
@@ -276,10 +316,9 @@ async def health_check():
     code = 200 if status == "ok" else 503
     return JSONResponse(
         status_code=code,
-        content={"status": status, "db": db_ok, "redis": redis_ok, "gpu_pod": gpu_pod}
+        content={"status": status, "db": db_ok, "redis": redis_ok, "gpu_pod": gpu_pod},
     )
 
 
-import os
 if os.path.isdir("frontend/dist"):
     app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")

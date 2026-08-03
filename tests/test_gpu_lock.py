@@ -22,7 +22,6 @@ import gpu_lock
 
 
 class TestGpuLock:
-
     def test_acquire_returns_true(self, redis_client):
         assert gpu_lock.acquire("token-a") is True
 

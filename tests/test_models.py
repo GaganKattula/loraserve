@@ -8,7 +8,7 @@ at the API boundary before any S3 upload or RQ enqueue happens.
 
 import pytest
 from pydantic import ValidationError
-from api.models import JobRequest, Example, InferRequest
+from api.models import JobRequest, InferRequest
 
 
 def _make_examples(n: int) -> list[dict]:
@@ -16,7 +16,6 @@ def _make_examples(n: int) -> list[dict]:
 
 
 class TestJobRequest:
-
     def test_rejects_under_20_examples(self):
         """<20 examples → ValidationError. Prevents low-quality adapters."""
         with pytest.raises(ValidationError, match="Need at least 20 examples"):
@@ -48,7 +47,6 @@ class TestJobRequest:
 
 
 class TestInferRequest:
-
     def test_default_max_new_tokens(self):
         req = InferRequest(text="hello world")
         assert req.max_new_tokens == 20

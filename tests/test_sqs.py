@@ -5,7 +5,6 @@ Tests verify the enqueue → receive → delete round-trip
 without any real AWS calls.
 """
 
-import json
 import pytest
 from unittest.mock import patch
 import boto3
@@ -25,8 +24,7 @@ def sqs_queue():
         queue_url = resp["QueueUrl"]
 
         # Patch settings and the module-level SQS client before importing sqs
-        with patch("sqs.settings") as mock_settings, \
-             patch("sqs._sqs", client):
+        with patch("sqs.settings") as mock_settings, patch("sqs._sqs", client):
             mock_settings.sqs_queue_url = queue_url
             mock_settings.sqs_visibility_timeout = 900
             mock_settings.orchestrator_lambda_name = ""
@@ -45,7 +43,6 @@ def sqs_queue():
 
 
 class TestSQSRoundTrip:
-
     def test_enqueue_returns_message_id(self, sqs_queue):
         msg_id = sqs_queue["enqueue_job"]("test-job-123")
         assert isinstance(msg_id, str)

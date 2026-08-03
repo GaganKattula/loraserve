@@ -14,7 +14,6 @@ sent directly to the pod, bypassing the VPS's job-status validation.
 import uuid
 import pytest
 import pytest_asyncio
-from unittest.mock import patch, AsyncMock
 from httpx import AsyncClient, ASGITransport
 import db
 
@@ -26,6 +25,7 @@ async def app(clean_db):
     db.pool = clean_db
 
     from api.main import app as fastapi_app
+
     yield fastapi_app
 
 
@@ -38,7 +38,6 @@ async def client(app):
 
 @pytest.mark.asyncio
 class TestHealthEndpoint:
-
     async def test_health_returns_ok(self, client):
         resp = await client.get("/health")
         assert resp.status_code == 200
@@ -50,7 +49,6 @@ class TestHealthEndpoint:
 
 @pytest.mark.asyncio
 class TestJobEndpoints:
-
     async def test_get_nonexistent_job_returns_404(self, client):
         resp = await client.get(f"/jobs/{uuid.uuid4()}")
         assert resp.status_code == 404
@@ -59,8 +57,11 @@ class TestJobEndpoints:
     async def test_get_existing_job(self, client, clean_db):
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         resp = await client.get(f"/jobs/{job_id}")
         assert resp.status_code == 200
@@ -70,7 +71,6 @@ class TestJobEndpoints:
 
 @pytest.mark.asyncio
 class TestInferEndpoint:
-
     async def test_infer_nonexistent_job_returns_404(self, client):
         resp = await client.post(
             f"/infer/{uuid.uuid4()}",
@@ -82,8 +82,11 @@ class TestInferEndpoint:
         """Inference on a queued/running job must fail — the adapter doesn't exist yet."""
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         resp = await client.post(
             f"/infer/{job_id}",
@@ -92,7 +95,9 @@ class TestInferEndpoint:
         assert resp.status_code == 400
         assert "not ready" in resp.json()["detail"]
 
-    async def test_infer_returns_503_when_gpu_locked(self, client, clean_db, redis_client):
+    async def test_infer_returns_503_when_gpu_locked(
+        self, client, clean_db, redis_client
+    ):
         """GPU lock held by training → inference gets 503 with Retry-After.
 
         This is the core safety mechanism: training and inference never run
@@ -101,8 +106,11 @@ class TestInferEndpoint:
         """
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         await db.update_job_running(job_id, "worker-1")
         await db.complete_job(job_id, "s3://bucket/adapter/", 1.0, 10.0)
@@ -122,12 +130,16 @@ class TestInferEndpoint:
         monkeypatch.setenv("GPU_SHARED_SECRET", "correct-secret")
         # Force reload settings
         from config import Settings
+
         monkeypatch.setattr("api.main.settings", Settings())
 
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         await db.update_job_running(job_id, "worker-1")
         await db.complete_job(job_id, "s3://bucket/adapter/", 1.0, 10.0)
@@ -142,7 +154,6 @@ class TestInferEndpoint:
 
 @pytest.mark.asyncio
 class TestJobListEndpoint:
-
     async def test_list_jobs_empty(self, client):
         resp = await client.get("/jobs")
         assert resp.status_code == 200
@@ -153,8 +164,11 @@ class TestJobListEndpoint:
     async def test_list_jobs_returns_created_jobs(self, client, clean_db):
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=50, task_description="classify emails",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=50,
+            task_description="classify emails",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
         resp = await client.get("/jobs")
         assert resp.status_code == 200
@@ -167,8 +181,11 @@ class TestJobListEndpoint:
     async def test_list_jobs_pagination(self, client, clean_db):
         for i in range(5):
             await db.create_job(
-                id=uuid.uuid4(), num_examples=50, task_description=f"job {i}",
-                dataset_s3_key="k", template_version="alpaca_v1",
+                id=uuid.uuid4(),
+                num_examples=50,
+                task_description=f"job {i}",
+                dataset_s3_key="k",
+                template_version="alpaca_v1",
             )
         resp = await client.get("/jobs?limit=2&offset=0")
         data = resp.json()
@@ -179,10 +196,15 @@ class TestJobListEndpoint:
         """GET /jobs/{id} returns training metadata for dashboard display."""
         job_id = uuid.uuid4()
         await db.create_job(
-            id=job_id, num_examples=200, task_description="test",
-            dataset_s3_key="k", template_version="alpaca_v1",
+            id=job_id,
+            num_examples=200,
+            task_description="test",
+            dataset_s3_key="k",
+            template_version="alpaca_v1",
         )
-        await db.update_lora_config(job_id, 16, 32, ["q_proj", "k_proj", "v_proj", "o_proj"])
+        await db.update_lora_config(
+            job_id, 16, 32, ["q_proj", "k_proj", "v_proj", "o_proj"]
+        )
 
         resp = await client.get(f"/jobs/{job_id}")
         data = resp.json()

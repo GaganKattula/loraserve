@@ -9,21 +9,32 @@
 7. On any exception → fail_job(job_id, str(e))
 
 """
+
 import multiprocessing
 import asyncio
+import logging
 import os
+import signal
 import socket
 import threading
 import psycopg2
 import uuid
 import db
-from db import get_job, update_job_running, update_lora_config, complete_job, fail_job, init_pool
+from db import (
+    get_job,
+    update_job_running,
+    update_lora_config,
+    complete_job,
+    fail_job,
+    init_pool,
+)
 from storage import upload_adapter
 from worker.trainer import train_lora
 from worker.rank_selector import select_lora_config
 from redis import Redis
 from config import settings
 from serving.engine import evict_all
+from sqs import receive_job, delete_job_message
 import gpu_lock
 
 multiprocessing.set_start_method("spawn", force=True)
@@ -69,11 +80,13 @@ class HeartbeatThread(threading.Thread):
                 with pg.cursor() as cur:
                     cur.execute(
                         "UPDATE jobs SET last_alive_at = NOW() WHERE id = %s AND status = 'running'",
-                        (self._job_id,)
+                        (self._job_id,),
                     )
                 pg.commit()
             except Exception:
-                logger.warning("Heartbeat DB update failed for job %s", self._job_id, exc_info=True)
+                logger.warning(
+                    "Heartbeat DB update failed for job %s", self._job_id, exc_info=True
+                )
 
     def stop(self):
         self._stop_event.set()
@@ -90,11 +103,13 @@ async def _run_job(job_id: str):
         # 2. claim atomically
         rows = await update_job_running(job_id, WORKER_ID)
         if rows == 0:
-            return   # already claimed
+            return  # already claimed
 
         # 3. select lora config — sync, no await
         lora_cfg = select_lora_config(job["num_examples"])
-        await update_lora_config(job_id, lora_cfg.r, lora_cfg.alpha, lora_cfg.target_modules)
+        await update_lora_config(
+            job_id, lora_cfg.r, lora_cfg.alpha, lora_cfg.target_modules
+        )
 
         # 3.5. acquire GPU lock — blocks inference while training
         if not gpu_lock.acquire(lock_token):
@@ -115,7 +130,7 @@ async def _run_job(job_id: str):
             lora_config=lora_cfg,
             template_version=job["template_version"],
             redis_client=r,
-            pg_conn=pg
+            pg_conn=pg,
         )
 
         # 5. upload adapter to S3 — sync boto3
@@ -123,10 +138,7 @@ async def _run_job(job_id: str):
 
         # 6. mark complete
         await complete_job(
-            job_id,
-            adapter_path,
-            result["eval_loss"],
-            result["adapter_size_mb"]
+            job_id, adapter_path, result["eval_loss"], result["adapter_size_mb"]
         )
 
     except Exception as e:
@@ -139,10 +151,6 @@ async def _run_job(job_id: str):
         gpu_lock.release(lock_token)
         await db.pool.close()
 
-
-import signal
-import logging
-from sqs import receive_job, delete_job_message
 
 logger = logging.getLogger("worker")
 _running = True
@@ -174,7 +182,9 @@ def run_poll_loop():
 
     # Register this pod's IP in Redis for VPS inference proxy discovery
     pod_ip = _register_pod()
-    logger.info("Registered pod at %s (Redis key gpu:pod:host, TTL %ds)", pod_ip, POD_HOST_TTL)
+    logger.info(
+        "Registered pod at %s (Redis key gpu:pod:host, TTL %ds)", pod_ip, POD_HOST_TTL
+    )
 
     # Start the GPU pod inference server in a background thread
     _start_inference_server()
@@ -189,14 +199,19 @@ def run_poll_loop():
 
             job_id = msg["job_id"]
             receipt_handle = msg["_receipt_handle"]
-            logger.info("Received job %s (receive_count=%s)", job_id, msg["_receive_count"])
+            logger.info(
+                "Received job %s (receive_count=%s)", job_id, msg["_receive_count"]
+            )
 
             try:
                 asyncio.run(_run_job(job_id))
                 delete_job_message(receipt_handle)
                 logger.info("Job %s complete, message deleted", job_id)
             except Exception:
-                logger.exception("Job %s failed — message will redeliver after visibility timeout", job_id)
+                logger.exception(
+                    "Job %s failed — message will redeliver after visibility timeout",
+                    job_id,
+                )
 
         except Exception:
             logger.exception("Poll loop error — continuing")
@@ -205,5 +220,7 @@ def run_poll_loop():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
     run_poll_loop()
