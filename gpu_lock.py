@@ -17,6 +17,7 @@ the lock, the original holder's DEL would release someone else's lock.
 """
 
 from redis import Redis
+
 from config import settings
 
 LOCK_KEY = "gpu:lock"
