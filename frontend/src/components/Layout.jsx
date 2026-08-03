@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import GpuBanner from './GpuBanner';
 
 export default function Layout({ children }) {
   return (
@@ -10,6 +11,7 @@ export default function Layout({ children }) {
           <Link to="/new">New Job</Link>
         </nav>
       </header>
+      <GpuBanner />
       <main className="page">{children}</main>
     </>
   );

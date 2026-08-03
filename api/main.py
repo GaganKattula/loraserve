@@ -254,6 +254,7 @@ async def health_check():
     """Liveness probe — checks DB pool and Redis connectivity."""
     db_ok = False
     redis_ok = False
+    gpu_pod = False
 
     try:
         async with db.pool.acquire() as conn:
@@ -265,6 +266,7 @@ async def health_check():
     try:
         r = aioredis.from_url(settings.redis_url)
         await r.ping()
+        gpu_pod = bool(await r.exists("gpu:pod:host"))
         await r.aclose()
         redis_ok = True
     except Exception:
@@ -274,7 +276,7 @@ async def health_check():
     code = 200 if status == "ok" else 503
     return JSONResponse(
         status_code=code,
-        content={"status": status, "db": db_ok, "redis": redis_ok}
+        content={"status": status, "db": db_ok, "redis": redis_ok, "gpu_pod": gpu_pod}
     )
 
 

@@ -54,3 +54,8 @@ export async function chat(jobId, messages, maxNewTokens = 50) {
 export function streamJob(jobId) {
   return new EventSource(`${API}/jobs/${jobId}/stream`);
 }
+
+export async function getGpuStatus() {
+  const res = await fetch(`${API}/health`);
+  return res.json();
+}

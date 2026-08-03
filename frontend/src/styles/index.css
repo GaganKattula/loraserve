@@ -147,6 +147,29 @@ tr { cursor: pointer; }
 .status-bar.error { background: #fee2e2; color: #991b1b; }
 .status-bar.idle { background: #f3f4f6; color: #6b7280; }
 
+/* ── GPU Pod Banner ── */
+.gpu-banner {
+  width: 100%;
+  padding: 8px 24px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.gpu-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.gpu-banner--online { background: #d1fae5; color: #065f46; }
+.gpu-banner--online .gpu-banner-dot { background: #10b981; }
+.gpu-banner--offline { background: #f3f4f6; color: #6b7280; }
+.gpu-banner--offline .gpu-banner-dot { background: #9ca3af; }
+
 /* ── Misc ── */
 .page-title { font-size: 20px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
 .empty-state { text-align: center; color: #999; padding: 48px 0; }
