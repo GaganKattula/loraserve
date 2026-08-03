@@ -125,14 +125,13 @@ class TestInferEndpoint:
         assert resp.status_code == 503
         assert "Retry-After" in resp.headers
 
-    async def test_shared_secret_rejects_bad_token(self, client, clean_db, monkeypatch):
-        """Missing/wrong secret → 401. Protects the GPU pod from direct access."""
-        monkeypatch.setenv("GPU_SHARED_SECRET", "correct-secret")
-        # Force reload settings
-        from config import Settings
+    async def test_infer_returns_503_when_pod_offline(self, client, clean_db):
+        """Completed job but no GPU pod registered → 503 with Retry-After.
 
-        monkeypatch.setattr("api.main.settings", Settings())
-
+        In the proxy architecture, the VPS validates the job then forwards
+        to the GPU pod. If no pod is registered in Redis, the proxy returns
+        503 instead of hanging on a dead IP.
+        """
         job_id = uuid.uuid4()
         await db.create_job(
             id=job_id,
@@ -147,9 +146,9 @@ class TestInferEndpoint:
         resp = await client.post(
             f"/infer/{job_id}",
             json={"text": "test", "max_new_tokens": 5},
-            headers={"Authorization": "Bearer wrong-secret"},
         )
-        assert resp.status_code == 401
+        assert resp.status_code == 503
+        assert "GPU pod" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
