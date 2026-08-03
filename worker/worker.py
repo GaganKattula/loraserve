@@ -168,7 +168,9 @@ def _start_inference_server():
     from serving.app import app as infer_app
 
     def _run():
-        uvicorn.run(infer_app, host="0.0.0.0", port=8001, log_level="info")
+        config = uvicorn.Config(infer_app, host="0.0.0.0", port=8001, log_level="info")
+        server = uvicorn.Server(config)
+        server.run()
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
