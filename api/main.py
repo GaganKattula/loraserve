@@ -5,34 +5,36 @@ POST /infer/{id} → validate job complete, run inference
 """
 
 import asyncio
-import db
+import json
 import os
 import uuid
-from uuid import UUID
-import json
 from contextlib import asynccontextmanager
+from uuid import UUID
+
+import httpx
+import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
-from db import create_tables, init_pool
-from db import create_job as db_create_job
-from db import get_job as db_get_job
-from storage import upload_dataset
-from sqs import enqueue_job, notify_lambda
-from config import settings
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+
+import db
 from api.models import (
-    JobRequest,
-    JobResponse,
-    JobStatusResponse,
+    ChatRequest,
+    ChatResponse,
     InferRequest,
     InferResponse,
     JobListResponse,
+    JobRequest,
+    JobResponse,
+    JobStatusResponse,
     JobSummary,
-    ChatRequest,
-    ChatResponse,
 )
-import httpx
-import redis.asyncio as aioredis
-from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from config import settings
+from db import create_job as db_create_job
+from db import create_tables, init_pool
+from db import get_job as db_get_job
+from sqs import enqueue_job, notify_lambda
+from storage import upload_dataset
 
 
 def serialize_examples(examples: list) -> bytes:
@@ -214,9 +216,7 @@ async def chat_job(job_id: UUID, request: ChatRequest):
                 "adapter_size_mb": job["adapter_size_mb"],
             },
             json={
-                "messages": [
-                    {"role": m.role, "content": m.content} for m in request.messages
-                ],
+                "messages": [{"role": m.role, "content": m.content} for m in request.messages],
                 "max_new_tokens": request.max_new_tokens,
             },
             headers={"Authorization": f"Bearer {settings.gpu_shared_secret}"},
@@ -263,7 +263,12 @@ async def stream_job(job_id: UUID):
         # Step 3 — check current status
         job = await db_get_job(job_id=job_id)
         if job["status"] in ("complete", "failed"):
-            yield f"data: {json.dumps({'type': 'done', 'status': job['status'], 'eval_loss': job['eval_loss']})}\n\n"
+            done_event = {
+                "type": "done",
+                "status": job["status"],
+                "eval_loss": job["eval_loss"],
+            }
+            yield f"data: {json.dumps(done_event)}\n\n"
             await pubsub.unsubscribe(f"job:{job_id}:events")
             await r.close()
             return

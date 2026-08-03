@@ -9,14 +9,15 @@ Three scans (per LLD-v3 mermaid spec):
 
 import asyncio
 import logging
-from sqs import enqueue_job
+
 from db import (
+    fail_job,
     get_stale_running_jobs,
     get_unclaimed_queued_jobs,
     get_upload_pending_jobs,
-    fail_job,
     increment_retry_count,
 )
+from sqs import enqueue_job
 
 logger = logging.getLogger("watchdog")
 
@@ -32,9 +33,7 @@ async def _scan_once():
     stale = await get_stale_running_jobs(STALE_THRESHOLD)
     for row in stale:
         job_id = row["id"]
-        logger.warning(
-            "Watchdog: marking stale job %s as failed (heartbeat lost)", job_id
-        )
+        logger.warning("Watchdog: marking stale job %s as failed (heartbeat lost)", job_id)
         await fail_job(job_id, "worker heartbeat lost")
 
     # Scan 2 — unclaimed queued jobs (e.g. SQS send_message failed after DB insert)

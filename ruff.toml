@@ -1,0 +1,7 @@
+line-length = 100
+
+[lint]
+select = ["E", "F", "I"]  # pycodestyle errors, pyflakes, isort
+
+[lint.isort]
+known-first-party = ["api", "worker", "serving"]

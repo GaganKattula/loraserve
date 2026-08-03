@@ -9,9 +9,10 @@ automatically.
 """
 
 import os
+
+import asyncpg
 import pytest
 import pytest_asyncio
-import asyncpg
 from redis import Redis
 
 # ── Use the same env vars the app uses (CI sets these; local dev uses .env) ────

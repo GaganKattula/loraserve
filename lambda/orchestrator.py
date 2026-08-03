@@ -8,8 +8,9 @@ Payload: {"job_id": "..."}
 """
 
 import json
-import os
 import logging
+import os
+
 import boto3
 
 logger = logging.getLogger()

@@ -23,8 +23,10 @@ Architecture defense:
 """
 
 import uuid
+
 import pytest
 import pytest_asyncio
+
 import db
 from watchdog import _scan_once
 

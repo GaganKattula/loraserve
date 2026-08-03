@@ -12,9 +12,11 @@ sent directly to the pod, bypassing the VPS's job-status validation.
 """
 
 import uuid
+
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
+
 import db
 
 
@@ -95,9 +97,7 @@ class TestInferEndpoint:
         assert resp.status_code == 400
         assert "not ready" in resp.json()["detail"]
 
-    async def test_infer_returns_503_when_gpu_locked(
-        self, client, clean_db, redis_client
-    ):
+    async def test_infer_returns_503_when_gpu_locked(self, client, clean_db, redis_client):
         """GPU lock held by training → inference gets 503 with Retry-After.
 
         This is the core safety mechanism: training and inference never run
@@ -202,9 +202,7 @@ class TestJobListEndpoint:
             dataset_s3_key="k",
             template_version="alpaca_v1",
         )
-        await db.update_lora_config(
-            job_id, 16, 32, ["q_proj", "k_proj", "v_proj", "o_proj"]
-        )
+        await db.update_lora_config(job_id, 16, 32, ["q_proj", "k_proj", "v_proj", "o_proj"])
 
         resp = await client.get(f"/jobs/{job_id}")
         data = resp.json()

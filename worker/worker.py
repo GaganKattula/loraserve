@@ -10,32 +10,34 @@
 
 """
 
-import multiprocessing
 import asyncio
 import logging
+import multiprocessing
 import os
 import signal
 import socket
 import threading
-import psycopg2
 import uuid
+
+import psycopg2
+from redis import Redis
+
 import db
+import gpu_lock
+from config import settings
 from db import (
-    get_job,
-    update_job_running,
-    update_lora_config,
     complete_job,
     fail_job,
+    get_job,
     init_pool,
+    update_job_running,
+    update_lora_config,
 )
-from storage import upload_adapter
-from worker.trainer import train_lora
-from worker.rank_selector import select_lora_config
-from redis import Redis
-from config import settings
 from serving.engine import evict_all
-from sqs import receive_job, delete_job_message
-import gpu_lock
+from sqs import delete_job_message, receive_job
+from storage import upload_adapter
+from worker.rank_selector import select_lora_config
+from worker.trainer import train_lora
 
 multiprocessing.set_start_method("spawn", force=True)
 r = Redis.from_url(settings.redis_url)
@@ -79,14 +81,13 @@ class HeartbeatThread(threading.Thread):
             try:
                 with pg.cursor() as cur:
                     cur.execute(
-                        "UPDATE jobs SET last_alive_at = NOW() WHERE id = %s AND status = 'running'",
+                        "UPDATE jobs SET last_alive_at = NOW()"
+                        " WHERE id = %s AND status = 'running'",
                         (self._job_id,),
                     )
                 pg.commit()
             except Exception:
-                logger.warning(
-                    "Heartbeat DB update failed for job %s", self._job_id, exc_info=True
-                )
+                logger.warning("Heartbeat DB update failed for job %s", self._job_id, exc_info=True)
 
     def stop(self):
         self._stop_event.set()
@@ -107,9 +108,7 @@ async def _run_job(job_id: str):
 
         # 3. select lora config — sync, no await
         lora_cfg = select_lora_config(job["num_examples"])
-        await update_lora_config(
-            job_id, lora_cfg.r, lora_cfg.alpha, lora_cfg.target_modules
-        )
+        await update_lora_config(job_id, lora_cfg.r, lora_cfg.alpha, lora_cfg.target_modules)
 
         # 3.5. acquire GPU lock — blocks inference while training
         if not gpu_lock.acquire(lock_token):
@@ -137,9 +136,7 @@ async def _run_job(job_id: str):
         adapter_path = upload_adapter(job_id, result["adapter_local_path"])
 
         # 6. mark complete
-        await complete_job(
-            job_id, adapter_path, result["eval_loss"], result["adapter_size_mb"]
-        )
+        await complete_job(job_id, adapter_path, result["eval_loss"], result["adapter_size_mb"])
 
     except Exception as e:
         await fail_job(job_id, str(e))
@@ -159,6 +156,7 @@ _running = True
 def _start_inference_server():
     """Start the GPU pod inference FastAPI app on :8001 in a background thread."""
     import uvicorn
+
     from serving.app import app as infer_app
 
     def _run():
@@ -182,9 +180,7 @@ def run_poll_loop():
 
     # Register this pod's IP in Redis for VPS inference proxy discovery
     pod_ip = _register_pod()
-    logger.info(
-        "Registered pod at %s (Redis key gpu:pod:host, TTL %ds)", pod_ip, POD_HOST_TTL
-    )
+    logger.info("Registered pod at %s (Redis key gpu:pod:host, TTL %ds)", pod_ip, POD_HOST_TTL)
 
     # Start the GPU pod inference server in a background thread
     _start_inference_server()
@@ -199,9 +195,7 @@ def run_poll_loop():
 
             job_id = msg["job_id"]
             receipt_handle = msg["_receipt_handle"]
-            logger.info(
-                "Received job %s (receive_count=%s)", job_id, msg["_receive_count"]
-            )
+            logger.info("Received job %s (receive_count=%s)", job_id, msg["_receive_count"])
 
             try:
                 asyncio.run(_run_job(job_id))
@@ -220,7 +214,5 @@ def run_poll_loop():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     run_poll_loop()

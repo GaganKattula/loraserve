@@ -1,19 +1,19 @@
 import json
-import torch
-import random
 import os
-from api.models import Example
-from storage import download_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import LoraConfig as PeftLoraConfig, get_peft_model, TaskType
-from torch.utils.data import Dataset, DataLoader
+import random
+
+import torch
+from peft import LoraConfig as PeftLoraConfig
+from peft import TaskType, get_peft_model
 from torch.nn.utils.rnn import pad_sequence
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
+from api.models import Example
 from config import settings
-
+from storage import download_dataset
 
 """
 It needs one function: train_lora(job_id, dataset_s3_key, lora_config, template_version) -> dict
@@ -84,17 +84,11 @@ def collate_fn(batch):
     return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
 
-TEMPLATES = {
-    "alpaca_v1": lambda text, label: (
-        f"### Instruction:\n{text}\n\n### Response:\n{label}"
-    )
-}
+TEMPLATES = {"alpaca_v1": lambda text, label: f"### Instruction:\n{text}\n\n### Response:\n{label}"}
 
 # Prompt-only templates — same structure but WITHOUT the label.
 # Used to compute prompt token length for prompt masking.
-PROMPT_TEMPLATES = {
-    "alpaca_v1": lambda text: f"### Instruction:\n{text}\n\n### Response:\n"
-}
+PROMPT_TEMPLATES = {"alpaca_v1": lambda text: f"### Instruction:\n{text}\n\n### Response:\n"}
 
 
 def format_examples(examples: list, template_version: str) -> list[str]:
@@ -102,9 +96,7 @@ def format_examples(examples: list, template_version: str) -> list[str]:
     return [template_fn(ex.text, ex.label) for ex in examples]
 
 
-def compute_prompt_lengths(
-    examples: list, template_version: str, max_length: int
-) -> list[int]:
+def compute_prompt_lengths(examples: list, template_version: str, max_length: int) -> list[int]:
     """Tokenize prompt-only portions to find where the response starts.
 
     Returns a list of token counts — one per example. Labels tokens start
@@ -115,9 +107,7 @@ def compute_prompt_lengths(
     lengths = []
     for ex in examples:
         prompt_only = prompt_fn(ex.text)
-        prompt_ids = tokenizer(
-            prompt_only, truncation=True, max_length=max_length, padding=False
-        )
+        prompt_ids = tokenizer(prompt_only, truncation=True, max_length=max_length, padding=False)
         lengths.append(len(prompt_ids["input_ids"]))
     return lengths
 
@@ -191,12 +181,8 @@ def train_lora(
     train_prompt_lengths = None
     eval_prompt_lengths = None
     if mask_prompt:
-        train_prompt_lengths = compute_prompt_lengths(
-            train_examples, template_version, max_length
-        )
-        eval_prompt_lengths = compute_prompt_lengths(
-            eval_examples, template_version, max_length
-        )
+        train_prompt_lengths = compute_prompt_lengths(train_examples, template_version, max_length)
+        eval_prompt_lengths = compute_prompt_lengths(eval_examples, template_version, max_length)
     # Step 3 - Load base model
     base_model = AutoModelForCausalLM.from_pretrained(
         settings.base_model, dtype=settings.dtype, device_map=settings.device
@@ -260,9 +246,7 @@ def train_lora(
             labels = batch["labels"].to(settings.device)
 
             # forward pass
-            outputs = model(
-                input_ids=input_ids, attention_mask=attention_mask, labels=labels
-            )
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
             loss = outputs.loss
 
             # backward pass
@@ -327,9 +311,7 @@ def train_lora(
                 attention_mask = batch["attention_mask"].to(settings.device)
                 labels = batch["labels"].to(settings.device)
 
-                outputs = model(
-                    input_ids=input_ids, attention_mask=attention_mask, labels=labels
-                )
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
 
                 loss = outputs.loss
                 total_eval_loss += loss.item()
@@ -339,9 +321,7 @@ def train_lora(
 
         redis_client.publish(
             f"job:{job_id}:events",
-            json.dumps(
-                {"type": "eval", "epoch": epoch + 1, "eval_loss": round(eval_loss, 4)}
-            ),
+            json.dumps({"type": "eval", "epoch": epoch + 1, "eval_loss": round(eval_loss, 4)}),
         )
         with pg_conn.cursor() as cur:
             cur.execute(
@@ -363,9 +343,7 @@ def train_lora(
 
     redis_client.publish(
         f"job:{job_id}:events",
-        json.dumps(
-            {"type": "done", "status": "complete", "eval_loss": round(eval_loss, 4)}
-        ),
+        json.dumps({"type": "done", "status": "complete", "eval_loss": round(eval_loss, 4)}),
     )
 
     # Step 7 - Save and Return adapter

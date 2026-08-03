@@ -10,10 +10,11 @@ Request flow:
   Browser → Nginx → VPS API (proxy) → THIS APP → serving.engine → response
 """
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from config import settings
+
 import gpu_lock
+from config import settings
 
 app = FastAPI()
 
@@ -24,9 +25,7 @@ async def verify_gpu_secret(authorization: str | None = Header(default=None)):
     if not secret:
         return
     if authorization != f"Bearer {secret}":
-        raise HTTPException(
-            status_code=401, detail="Invalid or missing GPU shared secret"
-        )
+        raise HTTPException(status_code=401, detail="Invalid or missing GPU shared secret")
 
 
 # ── Request/Response models (local to GPU pod, not shared with VPS) ──
@@ -71,7 +70,7 @@ async def infer_job(
             detail="GPU busy (training in progress)",
         )
 
-    from serving.engine import run_inference, InsufficientVRAMError
+    from serving.engine import InsufficientVRAMError, run_inference
 
     try:
         result = await run_inference(
@@ -107,7 +106,7 @@ async def chat_job(
             detail="GPU busy (training in progress)",
         )
 
-    from serving.engine import run_chat, InsufficientVRAMError
+    from serving.engine import InsufficientVRAMError, run_chat
 
     try:
         result = await run_chat(

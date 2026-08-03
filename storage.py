@@ -1,5 +1,7 @@
-import boto3
 import os
+
+import boto3
+
 from config import settings
 
 """

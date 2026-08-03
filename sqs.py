@@ -7,10 +7,12 @@ delete_job_message(receipt_handle) → None
 notify_lambda(job_id)          → None  (fire-and-forget async invocation)
 """
 
-import json
 import datetime
+import json
 import logging
+
 import boto3
+
 from config import settings
 
 logger = logging.getLogger("sqs")
@@ -51,9 +53,7 @@ def receive_job(wait_seconds: int = 20) -> dict | None:
     msg = messages[0]
     body = json.loads(msg["Body"])
     body["_receipt_handle"] = msg["ReceiptHandle"]
-    body["_receive_count"] = int(
-        msg.get("Attributes", {}).get("ApproximateReceiveCount", 1)
-    )
+    body["_receive_count"] = int(msg.get("Attributes", {}).get("ApproximateReceiveCount", 1))
     return body
 
 

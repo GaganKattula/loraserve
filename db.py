@@ -1,6 +1,6 @@
 import asyncpg
-from config import settings
 
+from config import settings
 
 """
 create_tables()        — CREATE TABLE IF NOT EXISTS for jobs and training_events
@@ -65,9 +65,7 @@ async def create_tables():
         await conn.close()
 
 
-async def create_job(
-    id, num_examples, task_description, dataset_s3_key, template_version
-):
+async def create_job(id, num_examples, task_description, dataset_s3_key, template_version):
 
     async with pool.acquire() as conn:
         job_id = await conn.fetchval(
@@ -278,6 +276,4 @@ async def get_upload_pending_jobs(max_retries: int = 3):
 async def increment_retry_count(job_id):
     """Bump retry_count for upload retry tracking."""
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE jobs SET retry_count = retry_count + 1 WHERE id = $1", job_id
-        )
+        await conn.execute("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = $1", job_id)

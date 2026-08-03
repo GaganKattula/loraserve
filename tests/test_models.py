@@ -8,7 +8,8 @@ at the API boundary before any S3 upload or RQ enqueue happens.
 
 import pytest
 from pydantic import ValidationError
-from api.models import JobRequest, InferRequest
+
+from api.models import InferRequest, JobRequest
 
 
 def _make_examples(n: int) -> list[dict]:

@@ -16,8 +16,10 @@ Architecture notes for interview defense:
 """
 
 import uuid
+
 import pytest
 import pytest_asyncio
+
 import db
 
 

@@ -1,15 +1,15 @@
-from pydantic import BaseModel, field_validator
-from uuid import UUID
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+from uuid import UUID
 
+from pydantic import BaseModel, field_validator
 
 """
 Example          — one labeled example: text + label
 JobRequest       — POST /jobs body: task_description + list of Examples
                    with a validator that enforces minimum 20 examples
 JobResponse      — POST /jobs response: job_id + status + stream_url + infer_url
-JobStatusResponse — GET /jobs/{id} response: job_id + status + eval_loss + adapter_path + training metadata
+JobStatusResponse — GET /jobs/{id} response: full job status + training metadata
 JobSummary       — one job in the GET /jobs list
 JobListResponse  — GET /jobs response: paginated job list
 """

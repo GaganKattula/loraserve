@@ -5,11 +5,11 @@ Tests verify the enqueue → receive → delete round-trip
 without any real AWS calls.
 """
 
-import pytest
 from unittest.mock import patch
-import boto3
-from moto import mock_aws
 
+import boto3
+import pytest
+from moto import mock_aws
 
 FAKE_QUEUE_NAME = "lora-serve-jobs-test"
 FAKE_REGION = "us-east-1"
@@ -31,7 +31,7 @@ def sqs_queue():
             mock_settings.aws_default_region = FAKE_REGION
             mock_settings.aws_profile = ""
 
-            from sqs import enqueue_job, receive_job, delete_job_message
+            from sqs import delete_job_message, enqueue_job, receive_job
 
             yield {
                 "client": client,

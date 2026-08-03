@@ -1,11 +1,13 @@
 import asyncio
-import torch
 import time
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from config import settings
-from peft import get_peft_model
-from peft import LoraConfig as PeftLoraConfig, TaskType
 from collections import OrderedDict
+
+import torch
+from peft import LoraConfig as PeftLoraConfig
+from peft import TaskType, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from config import settings
 from storage import download_adapter
 
 bootstrap_config = PeftLoraConfig(
@@ -27,9 +29,7 @@ cache = OrderedDict()
 model = get_peft_model(base_model, bootstrap_config)  # needs bootstrap PeftLoraConfig
 
 
-INFERENCE_TEMPLATES = {
-    "alpaca_v1": lambda text: f"### Instruction:\n{text}\n\n### Response:\n"
-}
+INFERENCE_TEMPLATES = {"alpaca_v1": lambda text: f"### Instruction:\n{text}\n\n### Response:\n"}
 
 """
 Phase 3 — multi-adapter serving with an LRU cache, replacing Phase 1's
@@ -130,9 +130,7 @@ async def run_chat(
     cache_hit = await get_or_load_adapter(job_id, adapter_path, adapter_size_mb)
 
     # Format using the tokenizer's built-in chat template (ChatML for SmolLM2-Instruct)
-    prompt = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     inputs = tokenizer(text=prompt, return_tensors="pt").to(settings.device)
     input_length = inputs["input_ids"].shape[1]  # (1, T) → T
@@ -178,7 +176,8 @@ async def get_or_load_adapter(job_id, adapter_path, adapter_size_mb):
             except torch.cuda.OutOfMemoryError:
                 if len(cache) == 0:
                     raise InsufficientVRAMError(
-                        f"Cannot load adapter for job {job_id} — insufficient VRAM after full cache eviction"
+                        f"Cannot load adapter for job {job_id}"
+                        " — insufficient VRAM after full cache eviction"
                     )
                 evicted_id, evicted_meta = cache.popitem(last=False)
                 model.delete_adapter(evicted_id)

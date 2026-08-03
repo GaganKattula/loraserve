@@ -7,10 +7,10 @@ a 24GB pod), while undersizing loses fine-tuning quality.
 """
 
 from worker.rank_selector import (
-    select_lora_config,
-    ATTENTION_ONLY,
-    ATTENTION_FULL,
     ATTENTION_AND_MLP,
+    ATTENTION_FULL,
+    ATTENTION_ONLY,
+    select_lora_config,
 )
 
 
