@@ -17,7 +17,7 @@ import threading
 import psycopg2
 import uuid
 import db
-from db import get_job, update_job_running, update_lora_config, complete_job, fail_job, init_pool, heartbeat_job
+from db import get_job, update_job_running, update_lora_config, complete_job, fail_job, init_pool
 from storage import upload_adapter
 from worker.trainer import train_lora
 from worker.rank_selector import select_lora_config
@@ -48,24 +48,32 @@ def _register_pod():
 
 
 class HeartbeatThread(threading.Thread):
-    """Background thread that renews the GPU lock TTL and updates last_alive_at every 30s."""
+    """Background thread that renews the GPU lock TTL and updates last_alive_at every 30s.
+
+    Uses the sync psycopg2 connection (pg) instead of the async pool to avoid
+    event loop conflicts — the async pool is bound to _run_job's event loop,
+    which is different from the heartbeat thread's context.
+    """
 
     def __init__(self, job_id: str, lock_token: str):
         super().__init__(daemon=True)
         self._job_id = job_id
         self._lock_token = lock_token
         self._stop_event = threading.Event()
-        self._loop = None
 
     def run(self):
-        self._loop = asyncio.new_event_loop()
-        try:
-            while not self._stop_event.wait(HEARTBEAT_INTERVAL):
-                gpu_lock.renew(self._lock_token)
-                _register_pod()  # renew pod discovery key alongside GPU lock
-                self._loop.run_until_complete(heartbeat_job(self._job_id))
-        finally:
-            self._loop.close()
+        while not self._stop_event.wait(HEARTBEAT_INTERVAL):
+            gpu_lock.renew(self._lock_token)
+            _register_pod()
+            try:
+                with pg.cursor() as cur:
+                    cur.execute(
+                        "UPDATE jobs SET last_alive_at = NOW() WHERE id = %s AND status = 'running'",
+                        (self._job_id,)
+                    )
+                pg.commit()
+            except Exception:
+                logger.warning("Heartbeat DB update failed for job %s", self._job_id, exc_info=True)
 
     def stop(self):
         self._stop_event.set()
